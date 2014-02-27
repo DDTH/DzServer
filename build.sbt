@@ -14,9 +14,7 @@ libraryDependencies ++= Seq(
   cache
 )
 
-playAssetsDirectories <+= baseDirectory / "start_bundles"
-
-playAssetsDirectories <+= baseDirectory / "runtime_bundles"
+playAssetsDirectories <+= baseDirectory / "bundles"
 
 
 resolvers += "Typesafe repository" at "http://repo.typesafe.com/typesafe/releases/"
