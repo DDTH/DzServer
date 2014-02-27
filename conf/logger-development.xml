@@ -6,7 +6,7 @@
 	<appender name="FILE" class="ch.qos.logback.core.FileAppender">
 		<file>${application.home}/logs/dzserver-logback.log</file>
 		<encoder>
-			<pattern><![CDATA[%date - [%level] - %class:%method(:%line) / %thread%n%message%n%xException%n]]></pattern>
+			<pattern><![CDATA[%date - [%level] - %class{}(%file:%line\) / %thread%n%message%n%xException%n]]></pattern>
 		</encoder>
 	</appender>
 
