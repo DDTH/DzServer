@@ -8,11 +8,13 @@ DzServer release notes
 
 **00.logging**
 
-Log4j 1.2.17 && slf4j 1.7.6
+Logback-1.1.1 && slf4j 1.7.6
 
-- log4j-1.2.17.jar
+- log4j-over-slf4j-1.7.6.jar
+- logback-classic-1.1.1.jar
+- logback-core-1.1.1.jar
+- osgi-over-slf4j-1.7.6.jar
 - slf4j-api-1.7.6.jar
-- slf4j-log4j12-1.7.6.jar
 
 **01.apachecommons**
 

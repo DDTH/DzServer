@@ -8,28 +8,34 @@ import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.Dictionary;
 import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Map.Entry;
+import java.util.Hashtable;
 import java.util.Properties;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.felix.framework.util.Util;
-import org.apache.felix.main.AutoProcessor;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleException;
+import org.osgi.framework.ServiceRegistration;
 import org.osgi.framework.launch.Framework;
-import org.osgi.framework.launch.FrameworkFactory;
 
 import play.Application;
 import play.GlobalSettings;
 import play.Logger;
 import play.Play;
-import play.api.mvc.EssentialFilter;
-import play.filters.gzip.GzipFilter;
+
+import com.github.ddth.frontapi.ApiParams;
+import com.github.ddth.frontapi.IApi;
+import com.github.ddth.frontapi.IApiRegistry;
+import com.github.ddth.frontapi.impl.ApiRegistry;
+import com.github.ddth.frontapi.impl.ThriftApiServer;
+import com.github.ddth.frontapi.internal.Activator;
+import com.github.ddth.frontapi.osgi.Constants;
+
 import dzserver.utils.FelixOsgiUtils;
 
 public class Global extends GlobalSettings {
@@ -41,16 +47,21 @@ public class Global extends GlobalSettings {
         System.setProperty("logger.resource", "logger-development.xml");
     }
 
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T extends EssentialFilter> Class<T>[] filters() {
-        return new Class[] { GzipFilter.class };
-    }
+    // /**
+    // * {@inheritDoc}
+    // */
+    // @Override
+    // @SuppressWarnings("unchecked")
+    // public <T extends EssentialFilter> Class<T>[] filters() {
+    // return new Class[] { GzipFilter.class };
+    // }
 
     private void initEnv() {
+        File appHome = dzserver.Application.applicationHomeDir();
+        File tempDir = new File(appHome, "tmp");
+        FileUtils.deleteQuietly(tempDir);
+        tempDir.mkdirs();
+
         if (Play.isProd()) {
             System.setProperty("spring.profiles.active", "production");
             System.setProperty("logger.resource", "logger-production.xml");
@@ -100,10 +111,109 @@ public class Global extends GlobalSettings {
 
     private void init() throws Exception {
         initFelix();
+        initApiRegistry();
+        initThriftServer();
     }
 
     private void destroy() throws Exception {
-        destroyFelix();
+        try {
+            destroyThriftServer();
+        } catch (Exception e) {
+            Logger.error(e.getMessage(), e);
+        }
+
+        try {
+            destroyFelix();
+        } catch (Exception e) {
+            Logger.error(e.getMessage(), e);
+        }
+
+        try {
+            destroyApiRegistry();
+        } catch (Exception e) {
+            Logger.warn(e.getMessage(), e);
+        }
+    }
+
+    private ThriftApiServer thriftApiServer;
+
+    private void initThriftServer() {
+        boolean thriftServerEnabled = false;
+        try {
+            thriftServerEnabled = Boolean.parseBoolean(dzserver.Application
+                    .staticConfigString(Activator.PROP_THRIFT_SERVER_ENABLED));
+        } catch (Exception e) {
+            thriftServerEnabled = false;
+        }
+        if (thriftServerEnabled) {
+            int thriftPort = ThriftApiServer.DEFAULT_THRIFT_SERVER_PORT;
+            try {
+                thriftPort = Integer.parseInt(dzserver.Application
+                        .staticConfigString(Activator.PROP_THRIFT_SERVER_PORT));
+            } catch (Exception e) {
+                thriftPort = ThriftApiServer.DEFAULT_THRIFT_SERVER_PORT;
+            }
+            Logger.info("API Thrift Server enabled, port " + thriftPort + ".");
+
+            thriftApiServer = new ThriftApiServer(apiRegistry);
+            int thriftMaxFrameSize = Integer.parseInt(dzserver.Application
+                    .staticConfigString(Activator.PROP_THRIFT_MAX_FRAME_SIZE));
+            long thriftMaxReadBufferSize = Long.parseLong(dzserver.Application
+                    .staticConfigString(Activator.PROP_THRIFT_MAX_READ_BUFFER_SIZE));
+            int thriftClientTimeout = Integer.parseInt(dzserver.Application
+                    .staticConfigString(Activator.PROP_THRIFT_CLIENT_TIMEOUT));
+            thriftApiServer.setClientTimeoutMillisecs(thriftClientTimeout)
+                    .setMaxFrameSize(thriftMaxFrameSize)
+                    .setMaxReadBufferSize(thriftMaxReadBufferSize).setPort(thriftPort);
+            thriftApiServer.start();
+        } else {
+            Logger.info("API Thrift Server disabled.");
+        }
+    }
+
+    private void destroyThriftServer() {
+        if (thriftApiServer != null) {
+            thriftApiServer.destroy();
+            thriftApiServer = null;
+        }
+    }
+
+    public static ApiRegistry apiRegistry;
+    private static ServiceRegistration<IApiRegistry> apiRegistryServiceRegistration;
+
+    private void initApiRegistry() {
+        apiRegistry = new ApiRegistry();
+        apiRegistry.init();
+
+        Dictionary<String, String> props = new Hashtable<>();
+        props.put(Constants.LOOKUP_PROP_MODULE, Activator.MODULE_NAME);
+        apiRegistryServiceRegistration = framework.getBundleContext().registerService(
+                IApiRegistry.class, apiRegistry, props);
+
+        IApi pingApi = new IApi() {
+            @Override
+            public Object call(ApiParams params) throws Exception {
+                return "pong";
+            }
+        };
+        apiRegistry.register(Activator.MODULE_NAME, "ping", pingApi);
+    }
+
+    private void destroyApiRegistry() {
+        if (apiRegistry != null) {
+            try {
+                apiRegistry.destroy();
+            } finally {
+                apiRegistry = null;
+                if (apiRegistryServiceRegistration != null) {
+                    try {
+                        apiRegistryServiceRegistration.unregister();
+                    } finally {
+                        apiRegistryServiceRegistration = null;
+                    }
+                }
+            }
+        }
     }
 
     private static Framework framework;
@@ -121,7 +231,7 @@ public class Global extends GlobalSettings {
 
     private void initFelix() throws IOException, BundleException, InterruptedException {
         Properties felixConfigProps = _loadFelixConfigProps();
-        _initFelixFramework(felixConfigProps);
+        framework = FelixOsgiUtils.createFelixFramework(felixConfigProps);
 
         Runtime.getRuntime().addShutdownHook(new Thread("Apache Felix Shutdown Hook") {
             public void run() {
@@ -158,66 +268,6 @@ public class Global extends GlobalSettings {
                 Logger.error(e.getMessage(), e);
             }
         }
-    }
-
-    private static void _initFelixFramework(Properties felixConfigProps) throws IOException,
-            BundleException {
-        // configure Felix auto-deploy directory
-        String sAutoDeployDir = felixConfigProps.getProperty(AutoProcessor.AUTO_DEPLOY_DIR_PROPERY);
-        if (sAutoDeployDir == null) {
-            throw new RuntimeException("Can not find configuration ["
-                    + AutoProcessor.AUTO_DEPLOY_DIR_PROPERY + "]");
-        }
-        File fAutoDeployDir = new File(dzserver.Application.applicationHomeDir(), sAutoDeployDir);
-        if (Logger.isDebugEnabled()) {
-            Logger.debug(AutoProcessor.AUTO_DEPLOY_DIR_PROPERY + ": "
-                    + fAutoDeployDir.getAbsolutePath());
-        }
-        felixConfigProps.setProperty(AutoProcessor.AUTO_DEPLOY_DIR_PROPERY,
-                fAutoDeployDir.getAbsolutePath());
-
-        // configure Felix temp (storage) directory
-        String sCacheDir = felixConfigProps
-                .getProperty(org.osgi.framework.Constants.FRAMEWORK_STORAGE);
-        if (sCacheDir == null) {
-            throw new RuntimeException("Can not find configuration ["
-                    + org.osgi.framework.Constants.FRAMEWORK_STORAGE + "]");
-        } else if (Logger.isDebugEnabled()) {
-            Logger.debug(org.osgi.framework.Constants.FRAMEWORK_STORAGE + ": " + sCacheDir);
-        }
-        File fCacheDir = new File(dzserver.Application.applicationHomeDir(), sCacheDir);
-        felixConfigProps.setProperty(org.osgi.framework.Constants.FRAMEWORK_STORAGE,
-                fCacheDir.getAbsolutePath());
-
-        // configure Felix's File Install watch directory
-        final String PROP_FELIX_FILE_INSTALL_DIR = "felix.fileinstall.dir";
-        String sMonitorDir = felixConfigProps.getProperty(PROP_FELIX_FILE_INSTALL_DIR);
-        if (sMonitorDir != null) {
-            File fMonitorDir = new File(dzserver.Application.applicationHomeDir(), sMonitorDir);
-            felixConfigProps
-                    .setProperty(PROP_FELIX_FILE_INSTALL_DIR, fMonitorDir.getAbsolutePath());
-            if (Logger.isDebugEnabled()) {
-                Logger.debug(PROP_FELIX_FILE_INSTALL_DIR + ": " + fMonitorDir.getAbsolutePath());
-            }
-        }
-
-        // check for Felix's Remote Shell listen IP & Port
-        if (Logger.isDebugEnabled()) {
-            String remoteShellListenIp = felixConfigProps.getProperty("osgi.shell.telnet.ip");
-            String remoteShellListenPort = felixConfigProps.getProperty("osgi.shell.telnet.port");
-            Logger.debug("Remote Shell: " + remoteShellListenIp + ":" + remoteShellListenPort);
-        }
-
-        Map<String, String> config = new HashMap<String, String>();
-        for (Entry<Object, Object> entry : felixConfigProps.entrySet()) {
-            config.put(entry.getKey().toString(), entry.getValue().toString());
-        }
-        FrameworkFactory factory = new org.apache.felix.framework.FrameworkFactory();
-        framework = factory.newFramework(config);
-        framework.init();
-        AutoProcessor.process(felixConfigProps, framework.getBundleContext());
-        FelixOsgiUtils.deployBundles(framework, fAutoDeployDir);
-        framework.start();
     }
 
     private static Properties _loadFelixConfigProps() throws IOException {
