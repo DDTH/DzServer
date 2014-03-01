@@ -3,11 +3,20 @@
 	<conversionRule conversionWord="coloredLevel"
 		converterClass="play.api.Logger$ColoredLevel" />
 
-	<appender name="FILE" class="ch.qos.logback.core.FileAppender">
+	<appender name="FILE"
+		class="ch.qos.logback.core.rolling.RollingFileAppender">
 		<file>${application.home}/logs/dzserver-logback.log</file>
+		<append>true</append>
 		<encoder>
-		    <pattern><![CDATA[%date - [%level] - %class{}(%file:%line\) / %thread%n%message%n%xException%n]]></pattern>
+			<pattern><![CDATA[%date - [%level] - %class{}(%file:%line\) / %thread%n%message%n%xException%n]]></pattern>
 		</encoder>
+		<rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+			<!-- daily rollover -->
+			<fileNamePattern><![CDATA[dzserver-logback.%d{yyyy-MM-dd}.log]]></fileNamePattern>
+
+			<!-- keep 3 days' worth of history -->
+			<maxHistory>3</maxHistory>
+		</rollingPolicy>
 	</appender>
 
 	<appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
