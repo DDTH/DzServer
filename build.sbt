@@ -1,6 +1,6 @@
 name := "DzServer"
 
-version := "1.0.1.3"
+version := "0.0.1.3-R1"
 
 libraryDependencies ++= Seq(
   "org.apache.felix"   % "org.apache.felix.framework" % "[4.2.1,5.0.0)",
