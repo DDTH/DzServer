@@ -14,12 +14,8 @@ libraryDependencies ++= Seq(
   cache
 )
 
-playAssetsDirectories <+= baseDirectory / "bundles"
-
-
 resolvers += "Typesafe repository" at "http://repo.typesafe.com/typesafe/releases/"
 
 resolvers += "Sonatype releases repository" at "http://oss.sonatype.org/content/repositories/releases/"
-
 
 play.Project.playJavaSettings
